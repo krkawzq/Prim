@@ -4,7 +4,7 @@
 
 # Prim
 
-**一切皆闭包的动态语言 · 解释执行 + 手动 LLVM ORC JIT**
+**一切皆闭包的动态语言 · 解释执行 + LLJIT**
 
 *closure 是静态的数据，closuring 是动态构造数据的过程。<br>对象是立即执行的 closuring，函数是延迟执行的 closuring。*
 
