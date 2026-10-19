@@ -20,6 +20,7 @@
     return p;
   }
   function block(b){
+    if(b.kind==='focus')return document.createDocumentFragment();
     if(b.kind==='table'){const table=make('table');b.rows.forEach((row,i)=>{const tr=make('tr');row.forEach(cell=>tr.append(make(i?'td':'th','',cell)));table.append(tr);});return at(table,b.step);}
     if(b.kind==='bullet')return at(bullet(b.text),b.step);
     if(b.kind==='output')return at(make('p','output',b.text),b.step);
@@ -27,8 +28,21 @@
     return at(make('p',b.step?'takeaway':'muted',b.text),b.step);
   }
   const copyOf=(blocks,cls='copy')=>{const copy=make('div',cls);for(const b of blocks)if(b.kind!=='code')copy.append(block(b));return copy;};
-  async function codePanel(b){const panel=at(make('section','code-panel'),b.step);panel.append(make('div','code-title',b.label));const code=make('div','code-text');code.setAttribute('aria-label',b.label+'代码');code.innerHTML=await window.PrimEditor.colorize(b.text,b.language==='text'?'plaintext':b.language);panel.append(code);return panel;}
-  function figure(slide){const key=slide.options.diagram;if(!key)return null;const area=make('div','figure-area');area.innerHTML=window.PrimDiagrams.render(key,slide.fields['设计说明']);return area.firstChild?area:null;}
+  /* Code is rendered one element per line so that steps can focus individual lines. */
+  async function codePanel(b,index=1){
+    const panel=at(make('section','code-panel'),b.step);panel.dataset.code=index;panel.append(make('div','code-title',b.label));
+    const code=make('div','code-text');code.setAttribute('aria-label',b.label+'代码');
+    const html=await window.PrimEditor.colorize(b.text,b.language==='text'?'plaintext':b.language),count=b.text.split('\n').length;
+    code.innerHTML=html.split(/<br\s*\/?>/i).slice(0,count).map(line=>`<div class="ln">${line.replace(/^<div[^>]*>|<\/div>$/g,'')||'&#8203;'}</div>`).join('');
+    panel.append(code);return panel;
+  }
+  function parseFocus(text){
+    if(text==='-')return null;
+    const map={};
+    for(const token of text.split(/\s+/)){const [k,v]=token.includes(':')?token.split(':'):['1',token];const lines=map[k]??=new Set();for(const part of v.split(',')){const [a,b=a]=part.split('-').map(Number);for(let n=a;n<=b;n++)lines.add(n);}}
+    return map;
+  }
+  function figure(slide){const [key,when]=(slide.options.diagram||'').split('@');if(!key)return null;const area=at(make('div','figure-area'),Number(when||0));area.innerHTML=window.PrimDiagrams.render(key,slide.fields['设计说明']);return area.firstChild?area:null;}
 
   function metricCard(scenario){
     const card=make('section','evidence-card');card.dataset.evidence=scenario;
@@ -108,11 +122,13 @@
         const lead=texts.find(b=>b.kind==='emphasis'),ask=texts.filter(b=>b.kind==='emphasis').at(-1);
         body.append(at(make('p','emphasis lead',lead.text),lead.step),await codePanel(codes[0]));
         const seq=make('div','sequence');texts.filter(b=>b.kind==='bullet').forEach((b,i)=>{if(i)seq.append(make('span','arrow'));seq.append(at(make('span','chip',b.text),b.step));});
-        body.append(seq,at(make('p','ask',ask.text),ask.step));break;}
+        const tail=make('div','ask-area');tail.append(at(make('p','ask',ask.text),ask.step));
+        for(const b of texts.filter(b=>b.kind==='text'))tail.append(at(make('p','question-note',b.text),b.step));
+        body.append(seq,tail);break;}
       case 'pair':{
         const lead=texts[0];body.append(at(make('p','emphasis lead',lead.text),lead.step));
-        const pair=make('div','code-pair');for(const c of codes)pair.append(await codePanel(c));body.append(pair);
-        for(const b of texts.slice(1))body.append(at(make('p','takeaway',b.text),b.step));break;}
+        const pair=make('div','code-pair');for(const [i,c] of codes.entries())pair.append(await codePanel(c,i+1));body.append(pair);
+        const notes=make('div','pair-notes');for(const b of texts.slice(1))notes.append(block(b));body.append(notes);break;}
       case 'cards':{
         body.className='slide-body cards-body';const lead=texts[0];body.append(at(make('p','emphasis lead',lead.text),lead.step));
         const cards=make('div','cards');texts.filter(b=>b.kind==='bullet').forEach((b,i)=>{const [title,text]=b.text.split('｜');const card=at(make('section','concept-card'),b.step);card.append(make('span','card-index',`0${i+1}`),make('h2','',title),make('p','',text||''));cards.append(card);});body.append(cards);
@@ -131,7 +147,9 @@
         body.append(grid);const shift=grid.children.length-1;
         for(const b of texts.slice(1).filter(b=>b.kind!=='bullet'))body.append(at(make('p','takeaway',b.text),b.step+shift));
         steps+=shift;await fillPipeline(grid);break;}
-      case 'bench':case 'orders':node.classList.add('evidence-slide');body.append(copyOf(texts),metricCard(slide.layout==='bench'?'jit':'orders'));break;
+      case 'bench':case 'orders':{
+        node.classList.add('evidence-slide');const when=Number(slide.options.card||0);steps=Math.max(steps,when);
+        body.append(copyOf(texts),at(metricCard(slide.layout==='bench'?'jit':'orders'),when));break;}
       case 'snake':{
         node.classList.add('evidence-slide');body.append(copyOf(texts));
         const record=make('section','evidence-card');record.append(make('h2','','一次真实 PTY 运行的画面'));
@@ -146,6 +164,7 @@
       default:{node.classList.add('text-slide');body.append(copyOf(texts));const fig=figure(slide);if(fig)body.append(fig);}
     }
     node.dataset.steps=steps;node.append(body);
+    node._focus=slide.blocks.filter(b=>b.kind==='focus').map(b=>({step:b.step,map:parseFocus(b.text)}));
     const foot=make('footer','slide-foot'),who=Object.values(data.presenter).filter(Boolean).join(' · ');
     foot.append(make('span','',slide.id==='01'&&who?who:data.metadata.title.replace('：',' · ')),make('span','page-id',`${slide.id} / ${String(data.slides.length).padStart(2,'0')}`));node.append(foot);
     return node;
@@ -163,13 +182,24 @@
 
   /* ---------- navigation ---------- */
   const active=()=>document.querySelector('.slide.active');
-  function applySteps(){const node=active();if(!node)return;node.querySelectorAll('[data-step]').forEach(el=>el.classList.toggle('pending',Number(el.dataset.step)>step));}
+  function applySteps(){
+    const node=active();if(!node)return;
+    node.querySelectorAll('[data-step]').forEach(el=>el.classList.toggle('pending',Number(el.dataset.step)>step));
+    const map=(node._focus||[]).filter(f=>f.step<=step).at(-1)?.map??null;
+    node.querySelectorAll('.code-panel[data-code]').forEach(panel=>{
+      const lines=exporting?null:map?.[panel.dataset.code];panel.classList.toggle('focusing',!!lines);
+      panel.querySelectorAll('.ln').forEach((ln,i)=>ln.classList.toggle('hl',!!lines?.has(i+1)));
+    });
+  }
   function show(id,options={}){
     if(!data)return;const index=typeof id==='number'?Math.max(0,Math.min(data.slides.length-1,id)):data.slides.findIndex(s=>s.id===id);if(index<0)return;
     if(index!==current)unmountRig();
+    const direction=index>=current?'enter-fwd':'enter-back',previous=current;
     current=index;
     document.querySelectorAll('.slide').forEach((s,i)=>{s.hidden=i!==current;s.classList.toggle('active',i===current);});
     const slide=data.slides[current],node=active();step=options.step==='all'?Number(node.dataset.steps):0;applySteps();
+    if(!exporting&&previous!==current&&previous>=0){node.classList.remove('enter-fwd','enter-back');void node.offsetWidth;node.classList.add(direction);}
+    if(current>0)startTimer();
     $('counter').textContent=`${slide.id} / ${data.slides.length}`;$('prev').disabled=current===0;$('next').disabled=current===data.slides.length-1;$('progress').style.width=`${(current+1)/data.slides.length*100}%`;
     $('chapter-label').textContent=slide.chapter||'';
     document.querySelectorAll('.overview-card').forEach(e=>e.classList.toggle('current',e.dataset.page===slide.id));
@@ -178,6 +208,11 @@
   }
   function next(){if(step<Number(active()?.dataset.steps||0)){step++;applySteps();}else if(current<data.slides.length-1)show(current+1);}
   function prev(){if(step>0){step--;applySteps();}else if(current>0)show(current-1,{step:'all'});}
+  let timerStart=0,timerHandle=0;
+  function startTimer(){if(timerStart)return;timerStart=Date.now();timerHandle=setInterval(tick,1000);tick();}
+  function tick(){const t=Math.floor((Date.now()-timerStart)/1000);$('timer').textContent=`${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`;$('timer').classList.toggle('over',t>(data.metadata.estimated_talk_minutes||15)*60);}
+  function resetTimer(){clearInterval(timerHandle);timerStart=0;$('timer').textContent='00:00';$('timer').classList.remove('over');}
+  const blackout=()=>{$('blackout').hidden=!$('blackout').hidden;};
   async function fullscreen(){try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{message('请使用浏览器的全屏功能。');}}
 
   /* ---------- code pages: one editor + terminal, moved into the active live slide ---------- */
@@ -232,6 +267,7 @@
 
   /* ---------- wiring ---------- */
   $('prev').onclick=()=>{prev();$('stage').focus({preventScroll:true});};$('next').onclick=()=>{next();$('stage').focus({preventScroll:true});};
+  $('blackout').onclick=blackout;$('timer').ondblclick=resetTimer;
   $('overview-button').onclick=()=>$('overview').showModal();$('overview-close').onclick=()=>$('overview').close();$('fullscreen-button').onclick=fullscreen;
   document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{if(!b.disabled)setMode(b.dataset.mode);}));
   $('run').onclick=run;$('stop').onclick=stop;window.addEventListener('prim-run',run);
@@ -253,6 +289,9 @@
     else if(e.key==='ArrowLeft'){e.preventDefault();prev();}
     else if(e.key==='Home')show(0);else if(e.key==='End')show(data.slides.length-1);
     else if(key==='o')$('overview').showModal();else if(key==='f')fullscreen();
+    else if(key==='t'){if(e.shiftKey)resetTimer();else $('timer').hidden=!$('timer').hidden;}
+    else if(key==='b'||key==='.'){blackout();}
+    else if(e.key==='Escape'&&!$('blackout').hidden)blackout();
   });
   try{
     [data,evidence,nativeRecord]=await Promise.all([fetch('/api/deck').then(async r=>{const v=await r.json();if(!r.ok)throw new Error(v.error);return v;}),fetch('/api/evidence').then(r=>r.json()),fetch('/api/native').then(r=>r.json())]);

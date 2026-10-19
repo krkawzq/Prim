@@ -25,7 +25,7 @@
 <footer class="controls">
  <span id="chapter-label" class="chapter-label"></span>
  <div class="pager"><button id="prev" class="icon" aria-label="上一页">←</button><span id="counter" aria-live="polite">01 / 32</span><button id="next" class="icon" aria-label="下一页">→</button></div>
- <span class="key-hint">← → 翻页 · 代码页内用 PageUp / PageDown · O 目录</span>
+ <span class="controls-right"><span id="timer" title="讲述计时 · T 显示/隐藏 · Shift+T 或双击归零" hidden>00:00</span><span class="key-hint">← → 翻页 · 代码页 PageUp/PageDown · O 目录 · T 计时 · B 黑屏</span></span>
  <div id="progress" aria-hidden="true"></div>
 </footer>
 <div id="rig-pool" aria-hidden="true">
@@ -52,4 +52,5 @@
 </div>
 <dialog id="overview" aria-labelledby="overview-title"><div class="panel-heading"><h2 id="overview-title">目录</h2><button id="overview-close" class="ghost">返回</button></div><div id="overview-grid"></div></dialog>
 <div id="message" class="toast" role="status" hidden></div>
+<div id="blackout" hidden aria-hidden="true"></div>
 </body></html>
