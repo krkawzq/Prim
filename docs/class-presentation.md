@@ -5,8 +5,8 @@ language: zh-CN
 audience: 编程语言与编译原理课程师生
 presentation_type: 语言设计与实现展示
 implementation_status: 开发中
-main_slides: 30
-appendix_slides: 5
+main_slides: 36
+appendix_slides: 3
 estimated_talk_minutes: 15
 aspect_ratio: "16:9"
 ---
@@ -15,7 +15,7 @@ aspect_ratio: "16:9"
 
 ## 使用说明
 
-主线：用一个订单金额汇总器（add / read）比较类型化、接口化、函数式三种常见写法，指出它们都把数据和计算当作两种东西；然后介绍 Prim 的基础语法和核心模型 closure / closuring，用 Prim 重写汇总器；接着讲实现（GC、手动 JIT、`std.inspect`）；最后是三个实战程序。概念页之后一般跟一页现场运行，讲的时候可以按时间取舍。
+主线：用一个订单金额汇总器（add / read）比较类型化、接口化、函数式三种常见写法，指出它们都把数据和计算当作两种东西；然后介绍 Prim 的基础语法和核心模型 closure / closuring，用 Prim 重写汇总器，并用类型化的视角重新理解这种写法；接着讲实现（GC、装饰器与手动 JIT、`std.inspect`）；最后是三个实战程序。概念页之后一般跟一页现场运行，讲的时候可以按时间取舍。
 
 每页栏目固定为“版式”“屏幕文案”“设计说明”“依据”：
 
@@ -746,9 +746,109 @@ live demo=accumulator
 
 ---
 
+## 17｜用类型的视角看汇总器
+
+### 版式
+
+pair
+
+### 屏幕文案
+
+**给汇总器写类型：一个记录类型，加一个返回它的工厂函数。Prim 的 .pri 接口文件可以直接写出来。**
+
+```prim accumulator.pr · 运行的代码
+let Accumulator = $[]() {
+    @{
+        let total = 0;
+        let add = $[&total](amount) {
+            total = total + amount;
+        };
+        let read = $[&total]() { total };
+    }
+};
+let orders = Accumulator();
+```
+
+```prim-interface accumulator.pri · 给编辑器的类型
+type Sum = @{
+    let total: int;
+    let add: $[](amount: int) -> unit;
+    let read: $[]() -> int;
+};
+
+let Accumulator: $[]() -> Sum;
+let orders: Sum;
+```
+
++++
+
+~ 1:2-8 2:1-5
+
+- @{ … } 对应记录（结构体）类型：每个 let 是一个成员；add、read 是函数类型的成员，相当于方法。
+
++++
+
+~ 1:1,9 2:7
+
+- 外层函数的类型是 $[]() -> Sum：一个工厂，作用和构造函数一样，每调用一次得到一个新的 Sum。
+
++++
+
+~ 1:4,7 2:3-4
+
+- [&total] 的作用相当于 this：方法靠它找到状态。区别是 this 指向整个对象，捕获只带走用到的那个槽，而且写在源码里。函数类型 $[](amount: int) -> unit 不包含捕获，捕获属于值，不属于类型。
+
++++
+
+~ -
+
+- Sum 是结构化的：任何带有这三个字段的 closure 都满足它，和第 4 页 TypeScript 的接口一样。
+- .pri 只给编辑器用（补全、悬停、签名、类型提示）；.pr 里不能写类型注解，运行时仍是动态类型。
+
+### 设计说明
+
+50 秒。把 Prim 写法翻译回第 3、4 页的类型化词汇：记录类型、方法、构造函数、this、接口。代码第二块是 Prim 现有的 .pri 接口语法。
+
+### 依据
+
+[类型提示与 .pri 接口文件](type-hints.md)、[语言规范 §6](language-spec.md)。
+
+---
+
+## 18｜类型化概念与 Prim 写法的对应
+
+### 版式
+
+table
+
+### 屏幕文案
+
+| 类型化写法 | Prim 写法 | 说明 |
+| --- | --- | --- |
+| class / struct 的字段 | @{ let x = …; } 里的 let | 立即 closuring 留下的槽 |
+| 方法 | 存在字段里的函数 | 用 [&x] 捕获对象的槽 |
+| this / self | 捕获列表 | 只带走用到的槽，显式写出 |
+| 构造函数 | 返回 @{ } 的函数 | 每次调用构造一个新对象 |
+| interface / trait | .pri 中的 @{ } 类型 | 结构化匹配，只给编辑器用 |
+| 函数类型 | $[](x: int) -> int | 捕获环境不属于类型 |
+| 闭包转换后的环境结构体 | 函数值的捕获字段 | 函数 = 捕获字段 + 代码入口 |
+| 继承 | 不支持 | 用组合和装饰器代替 |
+
+从类型的角度看，Prim 的 closure 就是“记录 + 可选的代码入口”：对象是没有代码入口的记录，函数是带捕获字段和代码入口的记录。
+
+### 设计说明
+
+40 秒。对照表，可以挑几行讲。最后一行“闭包转换”对应编译原理课上讲的 closure conversion：编译器把闭包变成“环境结构体 + 函数指针”，Prim 直接把这个结构作为语言里的值。
+
+### 依据
+
+[语言规范 §1.1、§6、§9](language-spec.md)、[类型提示](type-hints.md)。
+
+---
+
 # 三｜实现：内存、JIT 与内省
 
-## 17｜闭包逃逸与 GC
+## 19｜闭包逃逸与 GC
 
 ### 版式
 
@@ -804,7 +904,7 @@ std.print(add(300));
 
 ---
 
-## 18｜现场运行：逃逸的槽
+## 20｜现场运行：逃逸的槽
 
 ### 版式
 
@@ -824,15 +924,109 @@ live demo=lifetime
 
 ---
 
-## 19｜手动 JIT
+## 21｜装饰器
 
 ### 版式
 
-code diagram=jit-shared@3
+code
 
 ### 屏幕文案
 
-```prim 解释执行与本机代码共享槽
+```prim 装饰器就是闭包变换
+let traced = $[](f) {
+    $[f](x) {
+        std.print("call " + std.str(x));
+        f(x)
+    }
+};
+let double = @traced $[](x) { x * 2 };
+std.print(double(3));
+
+let square = @jit $[](x) { x * x };
+let both = @jit @traced $[](x) { x + 1 };
+std.print(square(7));
+std.print(both(41));
+```
+
+**@name 是一次普通的函数调用：把紧跟着的函数字面量传给 name，用返回值替换它。**
+
++++
+
+~ 1-6
+
+- traced 接收一个函数 f，返回一个捕获了 f 的新函数。装饰器本身也只是一个 closure，不是特殊语法对象。
+
++++
+
+~ 7-8
+
+- @traced $[](x) { … } 等价于 traced($[](x) { … })。装饰在表达式求值时执行一次，没有编译期宏展开。
+
++++
+
+~ 10
+
+- jit 是一个内置装饰器：@jit 字面量 和 jit(字面量) 效果相同，返回一个标记为 JIT 执行的新闭包。
+
++++
+
+~ 11-13
+
+- 多层装饰由内到外应用：@a @b f 等价于 a(b(f))。@jit @traced 编译的是外层包装；反过来写 @traced @jit，包装解释执行，被包装的函数走 JIT。
+- 每层必须返回可调用闭包，否则报 DecoratorResultError。@decorator(args) 不是语法，先写 let configured = decorator(args); 再 @configured。
+
+输出：call 3、6、49、call 41、42
+
+### 设计说明
+
+45 秒。先讲装饰器的一般形式，再引出 @jit。下一页讲 JIT 的语义。
+
+### 依据
+
+[语言规范 §9 装饰器与手动 JIT](language-spec.md)。
+
+---
+
+## 22｜现场运行：装饰器
+
+### 版式
+
+live demo=decorators
+
+### 屏幕文案
+
+**可以试着交换 @jit @traced 的顺序再运行，对比右侧 [jit] 日志里编译的是哪个函数。**
+
+### 设计说明
+
+可选，20 秒。
+
+### 依据
+
+`src/presentation/demos.json` 中的 decorators 示例。
+
+---
+
+## 23｜手动 JIT
+
+### 版式
+
+code
+
+### 屏幕文案
+
+```prim @jit 与 jit(f)
+let sum_to = @jit $[](n) {
+    let i = 0;
+    let total = 0;
+    loop {
+        if i > n { break total; };
+        total = total + i;
+        i = i + 1;
+    }
+};
+std.print(sum_to(100));
+
 let total = 0;
 let add = $[&total](amount) {
     total = total + amount;
@@ -845,40 +1039,47 @@ std.print(total);
 std.print(std.inspect.jit(native).state);
 ```
 
-**jit(f) 返回一个新闭包：执行方式换成本机代码，捕获的还是原来那些槽。**
+**@jit 装饰函数字面量，jit(f) 包装已有函数；都返回一个新闭包，执行方式换成本机代码，捕获的还是原来的槽。**
 
 +++
 
-~ 5
+~ 1-10
 
-- 是否 JIT 由程序显式决定（jit(f) 或 @jit），没有热点计数。
+- @jit：sum_to 从定义起就是 JIT 函数。是否 JIT 由程序显式决定，没有热点计数。
 
 +++
 
-~ 6-10
+~ 16
+
+- jit(add)：add 仍然解释执行，native 是共享同样捕获槽的新闭包。
+
++++
+
+~ 17-21
 
 - 第一次调用时编译，之后复用同一个入口；std.inspect.jit 能查到缓存状态和调用次数。
 
-输出：uncompiled、500、ready
+输出：5050、uncompiled、500、ready
 
 +++
 
 ~ -
 
-- native 和 add 读写同一个 total 槽：机器码只对应函数体，槽在调用时作为环境传入，不写进代码，所以同一个函数字面量的所有实例共用一份机器码。
-- 后端是 LLVM ORC LLJIT。整数 + - * 走带溢出检查的快路径，其他操作调用运行时 helper；纯局部整数运算的函数还会走局部标量路径，变量全部放进寄存器。
+- 槽在调用时作为环境传入，不写进机器码，所以同一个函数字面量的所有实例共用一份机器码。
+- 后端是 LLVM ORC LLJIT：整数 + - * 走带溢出检查的快路径，其他操作调用运行时 helper；纯局部整数函数走局部标量路径。
+- 编译失败报 JitCompileError，不会静默退回解释执行。
 
 ### 设计说明
 
-50 秒。第三步是实现要点，可以按时间取舍。
+50 秒。第四步是实现要点，可以按时间取舍。
 
 ### 依据
 
-[JIT 实现](jit-runtime.md)、`src/prim-rs/src/jit.rs`、`src/prim-rs/src/numeric.rs`。
+[语言规范 §9.2](language-spec.md)、[JIT 实现](jit-runtime.md)、`src/prim-rs/src/jit.rs`、`src/prim-rs/src/numeric.rs`。
 
 ---
 
-## 20｜现场运行：解释与 JIT
+## 24｜现场运行：解释与 JIT
 
 ### 版式
 
@@ -886,7 +1087,7 @@ live demo=jit-shared
 
 ### 屏幕文案
 
-**分别选“解释”和“JIT”运行：输出一样，但只有 JIT 模式下 state 会变成 ready。**
+**分别选“解释”和“JIT”运行：输出一样，但只有 JIT 模式下 state 会变成 ready，右侧也只有 JIT 模式会出现 [jit] compiled 日志。**
 
 ### 设计说明
 
@@ -898,7 +1099,7 @@ live demo=jit-shared
 
 ---
 
-## 21｜从源码到机器码
+## 25｜从源码到机器码
 
 ### 版式
 
@@ -927,7 +1128,7 @@ imul 后面紧跟 jno：整数乘法溢出时跳回运行时报错，其余情�
 
 ---
 
-## 22｜现场运行：完整的四层输出
+## 26｜现场运行：完整的四层输出
 
 ### 版式
 
@@ -947,7 +1148,52 @@ live demo=pipeline
 
 ---
 
-## 23｜builtin 与标准环境
+## 27｜读取已加载的机器码
+
+### 版式
+
+native
+
+### 屏幕文案
+
+**std.inspect 可以读出整个函数在内存里的机器码，而且是真实加载的指令。**
+
+- compile(f) 只准备本机入口，不执行函数体：之后 native_calls 为 0，调用一次后为 1。
+- native(f) 给出入口地址、字节数、hex 和反汇编，与 machine_code / disassemble 逐字节核对。
+- origin = loaded-memory：字节在 ORC 链接、重定位之后从内存复制出来，再交给 LLVM 反汇编。
+- 右侧是第四部分矩阵乘法内核里 imul 附近的一段，乘加都在寄存器里完成。
+
+### 设计说明
+
+40 秒。承接上一页的 square，换成一个更大的函数，同时为实战一做铺垫。
+
+### 依据
+
+[内省与机器码展示](introspection.md)、`src/presentation/native.py`。
+
+---
+
+## 28｜现场运行：读取机器码
+
+### 版式
+
+live demo=jit-native
+
+### 屏幕文案
+
+**带 --inspect 运行矩阵内核：先 compile，再打印元数据、hex 和完整反汇编，最后调用一次验证结果。**
+
+### 设计说明
+
+可选，20 秒。输出较长，可以在终端里滚动。
+
+### 依据
+
+`src/presentation/demos.json` 中的 jit-native 示例。
+
+---
+
+## 29｜builtin 与标准环境
 
 ### 版式
 
@@ -995,7 +1241,7 @@ std.print(std.inspect.describe(std.print).kind);
 
 # 四｜实战
 
-## 24｜实战一：矩阵乘法
+## 30｜实战一：矩阵乘法
 
 ### 版式
 
@@ -1025,7 +1271,7 @@ bench card=1
 
 ---
 
-## 25｜现场运行：矩阵乘法
+## 31｜现场运行：矩阵乘法
 
 ### 版式
 
@@ -1045,7 +1291,7 @@ live demo=jit
 
 ---
 
-## 26｜实战二：订单处理
+## 32｜实战二：订单处理
 
 ### 版式
 
@@ -1075,7 +1321,7 @@ orders card=1
 
 ---
 
-## 27｜现场运行：orders.pr
+## 33｜现场运行：orders.pr
 
 ### 版式
 
@@ -1095,7 +1341,7 @@ live demo=orders
 
 ---
 
-## 28｜实战三：终端贪吃蛇
+## 34｜实战三：终端贪吃蛇
 
 ### 版式
 
@@ -1121,7 +1367,7 @@ snake
 
 ---
 
-## 29｜现场运行：贪吃蛇
+## 35｜现场运行：贪吃蛇
 
 ### 版式
 
@@ -1143,7 +1389,7 @@ live demo=snake
 
 # 总结｜Prim
 
-## 30｜总结
+## 36｜总结
 
 ### 版式
 
@@ -1253,49 +1499,3 @@ text diagram=tooling
 ### 依据
 
 `src/presentation/`、`src/prim-language-server/`。
-
----
-
-## A4｜JIT 生成的机器码
-
-### 版式
-
-native
-
-### 屏幕文案
-
-**std.inspect.compile 只准备入口，不执行函数体。**
-
-- std.inspect.native 给出入口地址、字节数、hex 和反汇编。
-- machine_code / disassemble 与 native 的结果逐字节核对。
-- origin = loaded-memory：读取的是 ORC 链接后已加载到内存的指令。
-
-预编译后 native_calls 为 0，验证调用一次后为 1；这些查询不计入性能测量。
-
-### 设计说明
-
-答疑用。右侧是矩阵内核中 imul 附近的指令。
-
-### 依据
-
-[内省与机器码展示](introspection.md)、`src/presentation/native.py`。
-
----
-
-## A5｜现场运行：读取机器码
-
-### 版式
-
-live demo=jit-native
-
-### 屏幕文案
-
-**--inspect 分支打印矩阵内核已加载入口的元数据、hex 与反汇编。**
-
-### 设计说明
-
-答疑用。
-
-### 依据
-
-`src/presentation/demos.json` 中的 jit-native 示例。
